@@ -28,7 +28,7 @@ testRunner(options)
 Members of the `config` object passed to the `testRunner`.
 
 | Name | Type | Default Value | Description |
-| --- | --- | --- |
+| --- | --- | --- | --- |
 | `config.debug` | `Boolean` | `false` | (Optional) Runs the `testRunner` in `debug` mode, which launches each test case page in a chromium (non-headless) mode |
 | `config.injectScripts` | `Array<String>[]` | `undefined` | (Optional) A list of `path` or `url` of scripts to be injected into the `puppeteer` page context |
 | `config.globals` | `Object` | `undefined` | (Mandatory) An object containing `key-value` pairs of variables to be mounted as a global variable in the `puppeteer` page context for usage by the `evaluate` function |
