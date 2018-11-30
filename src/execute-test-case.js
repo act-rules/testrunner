@@ -1,87 +1,82 @@
 const scriptInjector = require('./script-injector')
-const awaitHandler = require('./await-handler')
 
+/**
+ * Mount a given set of values as globals on the Page
+ * @param {Object} page Page or Window object on which the globals have to be mounted
+ * @param {Object} globals Key Value Pair of globals to mount on the Page
+ */
+async function injectGlobals(page, globals) {
+  const keys = Object.keys(globals)
+  await Promise.all(keys.map(async (key) => {
+    const value = globals[key]
+    if (typeof value === 'function') {
+      await page.exposeFunction(key, value)
+    }
+    if (typeof value !== 'function') {
+      await page.evaluate(async function (object) {
+        return window[object.key] = object.value
+      }, { key, value })
+    }
+  }))
+}
+
+/**
+ * Execute given test case
+ * @param {Object} param meta data used to execute an ACT testcase
+ * @property {Object} param.browser Puppeteer browser object
+ * @property {Object} param.testcase ACT testcase
+ * @property {Object} param.options opts 
+ */
 async function executeTestCase({ browser, testcase, options }) {
   const { globals, evaluate } = options
 
   return new Promise(async (resolve, reject) => {
-    // open new page
-    const [pupOpenPageErr, page] = await awaitHandler(browser.newPage())
-    if (pupOpenPageErr) {
-      reject(pupOpenPageErr)
-    }
 
-    // go to given url
-    const [pupPageGoToErr] = await awaitHandler(
-      page.goto(testcase.url, { waitUntil: 'load' })
-    )
-    if (pupPageGoToErr) {
-      reject(pupPageGoToErr)
-    }
+    try {
+      // open new page
+      const page = await browser.newPage()
 
-    // inject scripts on page
-    const [pageScriptInjectErr] = await awaitHandler(
-      scriptInjector({
+      // go to given url
+      await page.goto(testcase.url, { waitUntil: 'load' })
+
+      // inject scripts on page
+      await scriptInjector({
         page,
         scripts: options.injectScripts
       })
-    )
-    if (pageScriptInjectErr) {
-      reject(pageScriptInjectErr)
-    }
 
-    // mutate global with testcase object
-    globals['testcase'] = testcase
+      // mutate global with testcase object
+      globals['testcase'] = testcase
 
-    // expose window level globals
-    const globalVarsAndFns = Object.keys(globals).reduce(
-      (out, key) => {
-        if (typeof globals[key] === 'function') {
-          out.functions[key] = globals[key]
-        }
-        if (typeof globals[key] !== 'function') {
-          out.variables[key] = globals[key]
-        }
-        return out
-      },
-      { variables: {}, functions: {} }
-    )
-
-    // inject global vars
-    const [injectVariablesError] = await awaitHandler(
-      page.evaluate(globals => {
-        Object.keys(globals).forEach(key => {
-          window[key] = globals[key]
-        })
-      }, globalVarsAndFns.variables)
-    )
-    if (injectVariablesError) {
-      reject(injectVariablesError)
-    }
-
-    // expose functions as global
-    const injectFnPromises = []
-    Object.keys(globalVarsAndFns.functions).forEach(async key => {
-      injectFnPromises.push(
-        page.exposeFunction(key, globalVarsAndFns.functions[key])
+      // expose window level globals
+      const globalVarsAndFns = Object.keys(globals).reduce(
+        (out, key) => {
+          if (typeof globals[key] === 'function') {
+            out.functions[key] = globals[key]
+          }
+          if (typeof globals[key] !== 'function') {
+            out.variables[key] = globals[key]
+          }
+          return out
+        },
+        { variables: {}, functions: {} }
       )
-    })
-    await Promise.all(injectFnPromises)
 
-    // evaluate given function in page context
-    const [evaluateErr, result] = await awaitHandler(page.evaluate(evaluate))
-    if (evaluateErr) {
-      reject(evaluateErr)
+      // inject global vars   
+      await injectGlobals(page, globalVarsAndFns.variables)
+
+      // expose functions as global
+      await injectGlobals(page, globalVarsAndFns.functions)
+
+      // evaluate given function in page context
+      const results = await page.evaluate(evaluate)
+      await page.close()
+
+      // resolve results
+      resolve(results)
+    } catch (error) {
+      reject(error)
     }
-
-    // shut down
-    const [pageCloseErr] = await awaitHandler(page.close())
-    if (pageCloseErr) {
-      reject(pageCloseErr)
-    }
-
-    // resolve results
-    resolve(result)
   })
 }
 

@@ -2,83 +2,82 @@ const pkg = require('../package.json')
 const puppeteer = require('puppeteer')
 const loadTestCases = require('./load-test-cases')
 const executeTestCase = require('./execute-test-case')
-const awaitHandler = require('./await-handler')
 
+/**
+ * Entry method for testrunner, asynchronously executes ACT testcases against a given test tool and retrieves results.
+ * @param {Object} options configuration options for the testrunner
+ */
 async function testRunner(options) {
-  console.log('Log: TestRunner: Start.')
+
+  process.setMaxListeners(Infinity)
+
+  console.log('TestRunner: Start.')
+
   const { debug = false, globals, skipTests } = options
+
   if (!globals) {
     throw new Error(
-      'Log: TestRunner: No `globals` object defined via configuration.'
+      'TestRunner: No `globals` object defined via configuration.'
     )
   }
 
   const { rulesMap = undefined } = globals
   if (!rulesMap) {
     throw new Error(
-      'Log: TestRunner: No `rulesMap` object defined in `globals` via configuration.'
+      'TestRunner: No `rulesMap` object defined in `globals` via configuration.'
     )
   }
 
   const rulesMappedIds = Object.keys(rulesMap)
   if (!rulesMappedIds || !rulesMappedIds.length) {
     throw new Error(
-      'Log: TestRunner: `rulesMap` does not contain `auto-wcag` rule id(s).'
+      'TestRunner: `rulesMap` does not contain `auto-wcag` rule id(s).'
     )
   }
 
-  // get all auto-wcag testcases
-  const [err, testcases] = await awaitHandler(
-    loadTestCases(pkg.config, rulesMappedIds, skipTests)
-  )
-  if (err) {
-    throw new Error('Log: TestRunner: Error loading test cases. ', err)
-  }
 
-  if (!testcases || !testcases.length) {
-    throw new Error(
-      'Log: TestRunner: No test cases are defined. Ensure test cases are supplied.'
-    )
-  }
+  try {
+    // get all auto-wcag testcases
+    const testcases = await loadTestCases(pkg.config, rulesMappedIds, skipTests)
 
-  // boot up puppeteer once
-  const [pupErr, browser] = await awaitHandler(
-    puppeteer.launch({
-      ...(debug && {
-        headless: false,
-        slowMo: 100 * 5,
-        devtools: true
+    if (!testcases || !testcases.length) {
+      throw new Error(
+        'TestRunner: No test cases are defined. Ensure test cases are supplied.'
+      )
+    }
+
+    // boot up puppeteer once
+    try {
+      const browser = await puppeteer.launch({
+        ...(debug && {
+          headless: false,
+          slowMo: 100 * 5,
+          devtools: true
+        })
       })
-    })
-  )
-  if (pupErr) {
-    throw new Error('Log: TestRunner: Unable to launch puppeteer.')
-  }
 
-  // run each test case
-  const promises = []
-  testcases.forEach(testcase => {
-    promises.push(executeTestCase({ browser, testcase, options }))
-  })
-
-  // return
-  return new Promise((resolve, reject) => {
-    Promise.all(promises)
-      .then(async results => {
-        console.log('Log: TestRunner: End.')
-        // close browser
-        const [browserCloseErr] = await awaitHandler(browser.close())
-        if (browserCloseErr) {
-          reject(browserCloseErr)
+      // run each test case and collate results
+      const results = []
+      for (const [index, testcase] of testcases.entries()) {
+        try {
+          const testCaseResult = await executeTestCase({ browser, testcase, options })
+          console.log(`Executed test case: ${index + 1} of ${testcases.length}`);
+          results.push(testCaseResult)
+        } catch (error) {
+          throw ('Error: TestRunner: ', error)
         }
-        // resolve
-        resolve(results)
-      })
-      .catch(err => {
-        console.error('Error: TestRunner: End.', err)
-        reject(err)
-      })
-  })
+      }
+
+      console.log('TestRunner: End.')
+      return results;
+    } catch (error) {
+      throw new Error('TestRunner: Unable to launch puppeteer.', error)
+    }
+
+  } catch (error) {
+    throw new Error('TestRunner: Error loading test cases. ', error)
+  }
+
 }
 
 module.exports = testRunner
